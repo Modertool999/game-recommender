@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Steam Game Recommender</title>
+  <!-- Make sure this matches your static folder path -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <h1>Steam Game Recommender</h1>
+
+  <form action="{{ url_for('recommend') }}" method="get">
+    <label for="steamid">Your Steam ID</label>
+    <input
+      type="text"
+      id="steamid"
+      name="steamid"
+      placeholder="e.g. 76561198000000000"
+      required
+    >
+    <small>
+      Don’t know it? Look up at
+      <a href="https://steamid.io/lookup" target="_blank">steamid.io/lookup</a>.
+    </small>
+
+    <label for="k">Number of recommendations</label>
+    <input
+      type="number"
+      id="k"
+      name="k"
+      value="5"
+      min="1"
+      required
+    >
+
+    <label for="w1">Weight: Your recent playtime (w₁)</label>
+    <input type="text" id="w1" name="w1" placeholder="e.g. 0.6">
+
+    <label for="w2">Weight: Friends’ playtime (w₂)</label>
+    <input type="text" id="w2" name="w2" placeholder="e.g. 0.25">
+
+    <label for="w3">Weight: Similarity to friends’ plays (w₃)</label>
+    <input type="text" id="w3" name="w3" placeholder="e.g. 0.15">
+
+    <button type="submit">Get Recommendations</button>
+  </form>
+
+  {% if error %}
+    <p class="error">{{ error }}</p>
+  {% endif %}
+
+  {% if recs %}
+    <h2>Your Top {{ recs|length }} Recommendations</h2>
+    <ol>
+      {% for rec in recs %}
+        <li>
+          {{ rec.name }} (Score: {{ "%0.3f"|format(rec.score) }})
+        </li>
+      {% endfor %}
+    </ol>
+  {% endif %}
+</body>
+</html>

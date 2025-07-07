@@ -1,0 +1,29 @@
+# Byte‐compiled / cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+env/
+venv/
+
+# IDE settings
+.vscode/
+.idea/
+
+# Environment variable files
+.env
+*.env
+
+# Data artifacts (per‐user CSVs, JSON cache)
+data/*.csv
+data/cache/
+data/*.json
+
+# Logs
+*.log
+
+# macOS / Windows cruft
+.DS_Store
+Thumbs.db
