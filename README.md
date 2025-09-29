@@ -13,16 +13,6 @@ A Python/Flask application that delivers personalized Steam game recommendations
 
 Weights are normalized and configurable.
 
-## Structure
-
-app.py : Flask routes & UI
-steam_api.py:  Steam API wrapper
-catalog_db.py: Builds/updates SQLite catalog
-feature_builder.py: Builds recent-play features
-advanced_recommender.py: TF-IDF model & scoring
-templates/index.html: Form UI
-static/styles.css: Basic styling
-
 ## Setup
 
 1. Clone repo and enter directory.  
