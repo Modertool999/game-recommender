@@ -68,6 +68,10 @@ def _compute_recommendations(steamid: str, k: int, w1: float, w2: float, w3: flo
 def index():
     return render_template("index.html")
 
+@app.get("/health")
+def health():
+    return {"ok": True}
+
 @app.route("/recommend", methods=["GET"])
 def recommend():
     steamid = request.args.get("steamid", type=str)
