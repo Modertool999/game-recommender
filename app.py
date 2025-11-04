@@ -1,4 +1,5 @@
 import os
+import pandas as pd
 from flask import Flask, request, render_template, jsonify
 from flask_cors import CORS
 
@@ -29,11 +30,15 @@ def _compute_recommendations(steamid: str, k: int, w1: float, w2: float, w3: flo
     k = max(1, k)
 
     games_df = build_game_dataset(api_key, steamid)
-    adv_rec.library = games_df["appid"].tolist()
+    if "appid" in games_df.columns:
+        adv_rec.library = games_df["appid"].dropna().tolist()
+    else:
+        adv_rec.library = []
 
     feats_df = build_recent_playtime_features(api_key, steamid)
 
     if feats_df.empty:
+        feats_df = pd.DataFrame(columns=["appid", "my_playtime", "friends_playtime"])
         feats_df["my_playtime_norm"] = 0.0
         feats_df["friends_playtime_norm"] = 0.0
     else:
@@ -51,6 +56,27 @@ def _compute_recommendations(steamid: str, k: int, w1: float, w2: float, w3: flo
     friends_recent = feats_df[["appid", "friends_playtime_norm"]].rename(
         columns={"friends_playtime_norm": "playtime_2weeks"}
     )
+
+    if my_recent["playtime_2weeks"].sum() == 0:
+        if "appid" in games_df.columns:
+            owned_base = games_df.drop_duplicates(subset=["appid"]).copy()
+        else:
+            owned_base = pd.DataFrame(columns=["appid", "playtime_forever"])
+        if "playtime_forever" not in owned_base.columns:
+            owned_base["playtime_forever"] = 0.0
+        owned_base["playtime_forever"] = owned_base["playtime_forever"].fillna(0).astype(float)
+        owned = owned_base[owned_base["playtime_forever"] > 0]
+        if owned.empty and not owned_base.empty:
+            owned = owned_base.copy()
+            owned["playtime_forever"] = 1.0
+        if owned.empty:
+            my_recent = pd.DataFrame(columns=["appid", "playtime_2weeks"])
+        else:
+            max_forever = owned["playtime_forever"].max()
+            owned["playtime_2weeks"] = (
+                owned["playtime_forever"] / max_forever if max_forever > 0 else 0.0
+            )
+            my_recent = owned[["appid", "playtime_2weeks"]]
 
     recs_df = adv_rec.recommend(
         my_recent=my_recent,
