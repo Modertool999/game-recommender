@@ -78,9 +78,27 @@ class AdvancedRecommender:
 
         # direct friends’ playtime
         fr_map = friends_recent.set_index("appid")["playtime_2weeks"].to_dict()
-        raw_fr = [fr_map.get(aid, 0) for aid in candidates["appid"]]
+        raw_fr = np.array([fr_map.get(aid, 0.0) for aid in candidates["appid"]], dtype=float)
 
-        candidates["score"] = alpha * sims_me + beta * np.array(raw_fr) + gamma * sims_fr
+        def _normalize_signal(arr: np.ndarray) -> np.ndarray:
+            arr = np.asarray(arr, dtype=float)
+            if arr.size == 0:
+                return arr
+            max_val = arr.max()
+            min_val = arr.min()
+            if np.isclose(max_val, min_val):
+                return np.zeros_like(arr)
+            return (arr - min_val) / (max_val - min_val)
+
+        user_signal = _normalize_signal(sims_me)
+        friends_play_signal = _normalize_signal(raw_fr)
+        friends_sim_signal = _normalize_signal(sims_fr)
+
+        candidates["score"] = (
+            alpha * user_signal
+            + beta * friends_play_signal
+            + gamma * friends_sim_signal
+        )
         return candidates.sort_values("score", ascending=False).head(k)[
             ["appid", "name", "score"]
         ]
