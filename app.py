@@ -1,10 +1,6 @@
 import os
-import sqlite3
-import numpy as np
-import pandas as pd
 from flask import Flask, request, render_template, jsonify
 from flask_cors import CORS
-from sklearn.preprocessing import MinMaxScaler
 
 from steam_api import build_game_dataset
 from feature_builder import build_recent_playtime_features
@@ -37,14 +33,17 @@ def _compute_recommendations(steamid: str, k: int, w1: float, w2: float, w3: flo
 
     feats_df = build_recent_playtime_features(api_key, steamid)
 
-    scaler = MinMaxScaler()
-    if not feats_df.empty:
-        feats_df[["my_playtime_norm", "friends_playtime_norm"]] = scaler.fit_transform(
-            feats_df[["my_playtime", "friends_playtime"]]
-        )
+    if feats_df.empty:
+        feats_df["my_playtime_norm"] = 0.0
+        feats_df["friends_playtime_norm"] = 0.0
     else:
-        feats_df["my_playtime_norm"] = 0
-        feats_df["friends_playtime_norm"] = 0
+        def _normalize(col: str, out_col: str):
+            series = feats_df[col].astype(float)
+            max_val = series.max()
+            feats_df[out_col] = series / max_val if max_val > 0 else 0.0
+
+        _normalize("my_playtime", "my_playtime_norm")
+        _normalize("friends_playtime", "friends_playtime_norm")
 
     my_recent = feats_df[["appid", "my_playtime_norm"]].rename(
         columns={"my_playtime_norm": "playtime_2weeks"}
