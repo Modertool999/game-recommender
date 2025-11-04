@@ -123,6 +123,7 @@ def api_recommend():
       k (int, optional, default 10)
       w_content (float, default 0.6)
       w_playtime (float, default 0.4)
+      w_social (float, default 0.0)
     Returns: [{"title": str, "score": float}, ...]
     """
     steam_id = request.args.get("steam_id", "").strip()
@@ -133,11 +134,12 @@ def api_recommend():
         k = int(request.args.get("k", 10))
         w_content = float(request.args.get("w_content", 0.6))
         w_playtime = float(request.args.get("w_playtime", 0.4))
+        w_social = float(request.args.get("w_social", 0.0))
     except ValueError:
         return jsonify({"error": "Invalid numeric parameter."}), 400
 
     try:
-        recs = _compute_recommendations(steam_id, k, w_content, w_playtime, 0.0)
+        recs = _compute_recommendations(steam_id, k, w_content, w_playtime, w_social)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 
