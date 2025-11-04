@@ -100,7 +100,7 @@ def build_game_dataset(api_key: str, steamid: str) -> pd.DataFrame:
     Returns a DataFrame of owned games enriched with store metadata.
     Columns include at least:
       - appid
-      - name/description/genres (from the store API)
+      - name (from owned-games API)
       - playtime_forever (lifetime minutes, from the owned-games API)
       - playtime_recent (two week minutes when available)
     """
@@ -111,12 +111,11 @@ def build_game_dataset(api_key: str, steamid: str) -> pd.DataFrame:
         appid = entry.get("appid")
         if appid is None:
             continue
-        meta = steam.get_app_details(appid)
-        if not meta.get("name"):
-            meta["name"] = entry.get("name", "")
-        meta["playtime_forever"] = entry.get("playtime_forever", 0)
-        # the owned-games payload sometimes omits playtime_2weeks
-        meta["playtime_recent"] = entry.get("playtime_2weeks", 0)
-        rows.append(meta)
+        rows.append({
+            "appid": appid,
+            "name": entry.get("name", ""),
+            "playtime_forever": entry.get("playtime_forever", 0),
+            "playtime_recent": entry.get("playtime_2weeks", 0),
+        })
 
     return pd.DataFrame(rows)

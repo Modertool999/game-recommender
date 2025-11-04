@@ -2,7 +2,7 @@ import os
 import pandas as pd
 from steam_api import SteamAPI, SteamAPIError
 
-DEFAULT_FRIEND_LIMIT = 20
+DEFAULT_FRIEND_LIMIT = 12
 
 def build_recent_playtime_features(
     api_key: str,
