@@ -1,15 +1,45 @@
-import os
 import requests
 import pandas as pd
+from requests import exceptions as req_exc
+
+
+class SteamAPIError(RuntimeError):
+    """Raised when Steam Web API calls fail in a user-visible way."""
 
 class SteamAPI:
     BASE  = "https://api.steampowered.com"
     STORE = "https://store.steampowered.com/api"
+    DEFAULT_TIMEOUT = (5, 30)  # (connect, read) seconds
 
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, timeout=None):
         if not api_key:
             raise RuntimeError("Missing Steam API key")
         self.key = api_key
+        self.timeout = timeout or self.DEFAULT_TIMEOUT
+
+    def _request(self, url: str, *, timeout=None, **kwargs):
+        effective_timeout = timeout or self.timeout
+        try:
+            resp = requests.get(url, timeout=effective_timeout, **kwargs)
+            resp.raise_for_status()
+            return resp
+        except req_exc.Timeout as exc:
+            raise SteamAPIError(
+                "Steam API timed out before responding. Valve’s servers may be busy; please retry in a moment."
+            ) from exc
+        except req_exc.HTTPError as exc:
+            status = exc.response.status_code if exc.response else "unknown"
+            if status in (401, 403):
+                raise SteamAPIError(
+                    "Steam rejected the request. Make sure your Steam profile and friends list are public."
+                ) from exc
+            raise SteamAPIError(
+                f"Steam API returned HTTP {status}. Please try again shortly."
+            ) from exc
+        except req_exc.RequestException as exc:
+            raise SteamAPIError(
+                "Network error while contacting Steam. Please check your connection and try again."
+            ) from exc
 
     def get_owned_games(self, steamid: str) -> list[dict]:
         """Returns list of owned games (with appid, name, playtime_forever, etc.)."""
@@ -20,8 +50,7 @@ class SteamAPI:
             "include_appinfo": True,
             "include_played_free_games": True
         }
-        r = requests.get(url, params=params, timeout=10)
-        r.raise_for_status()
+        r = self._request(url, params=params)
         return r.json().get("response", {}).get("games", [])
 
     def get_recently_played_games(self, steamid: str, count: int = 50) -> list[dict]:
@@ -32,8 +61,7 @@ class SteamAPI:
             "steamid": steamid,
             "count": count
         }
-        r = requests.get(url, params=params, timeout=10)
-        r.raise_for_status()
+        r = self._request(url, params=params)
         return r.json().get("response", {}).get("games", [])
 
     def get_friends(self, steamid: str) -> list[str]:
@@ -44,8 +72,7 @@ class SteamAPI:
             "steamid": steamid,
             "relationship": "friend"
         }
-        r = requests.get(url, params=params, timeout=10)
-        r.raise_for_status()
+        r = self._request(url, params=params)
         friends = r.json().get("friendslist", {}).get("friends", [])
         return [f["steamid"] for f in friends]
 
@@ -53,10 +80,8 @@ class SteamAPI:
         """Fetches store metadata for a given app; skips on error."""
         url = f"{self.STORE}/appdetails"
         try:
-            r = requests.get(url, params={"appids": appid}, timeout=5)
-        except requests.RequestException:
-            return {"appid": appid, "name": "", "description": "", "genres": ""}
-        if not r.ok or not r.text.strip():
+            r = self._request(url, params={"appids": appid}, timeout=(3, 10))
+        except SteamAPIError:
             return {"appid": appid, "name": "", "description": "", "genres": ""}
         try:
             payload = r.json()

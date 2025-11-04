@@ -3,7 +3,7 @@ import pandas as pd
 from flask import Flask, request, render_template, jsonify
 from flask_cors import CORS
 
-from steam_api import build_game_dataset
+from steam_api import build_game_dataset, SteamAPIError
 from feature_builder import build_recent_playtime_features
 from advanced_recommender import AdvancedRecommender
 
@@ -15,6 +15,9 @@ DB_PATH = "data/steam_catalog.db"
 if not os.path.exists(DB_PATH):
     raise RuntimeError(f"Catalog DB not found at {DB_PATH}. Run catalog_db.py first.")
 adv_rec = AdvancedRecommender(db_path=DB_PATH)
+
+class UserFacingError(RuntimeError):
+    """Raised when we should surface a friendly error to the client."""
 
 def _compute_recommendations(steamid: str, k: int, w1: float, w2: float, w3: float):
     """Shared recommendation pipeline for HTML + JSON endpoints."""
@@ -29,13 +32,19 @@ def _compute_recommendations(steamid: str, k: int, w1: float, w2: float, w3: flo
 
     k = max(1, k)
 
-    games_df = build_game_dataset(api_key, steamid)
+    try:
+        games_df = build_game_dataset(api_key, steamid)
+    except SteamAPIError as exc:
+        raise UserFacingError(str(exc)) from exc
     if "appid" in games_df.columns:
         adv_rec.library = games_df["appid"].dropna().tolist()
     else:
         adv_rec.library = []
 
-    feats_df = build_recent_playtime_features(api_key, steamid)
+    try:
+        feats_df = build_recent_playtime_features(api_key, steamid)
+    except SteamAPIError as exc:
+        raise UserFacingError(str(exc)) from exc
 
     if feats_df.empty:
         feats_df = pd.DataFrame(columns=["appid", "my_playtime", "friends_playtime"])
@@ -110,6 +119,8 @@ def recommend():
 
     try:
         recs = _compute_recommendations(steamid, k, w1, w2, w3)
+    except UserFacingError as exc:
+        return render_template("index.html", error=str(exc))
     except Exception as exc:  # surface API errors in the template
         return render_template("index.html", error=str(exc))
 
@@ -140,6 +151,8 @@ def api_recommend():
 
     try:
         recs = _compute_recommendations(steam_id, k, w_content, w_playtime, w_social)
+    except UserFacingError as exc:
+        return jsonify({"error": str(exc)}), 502
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 

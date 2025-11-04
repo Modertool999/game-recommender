@@ -1,10 +1,13 @@
+import os
 import pandas as pd
-from steam_api import SteamAPI
+from steam_api import SteamAPI, SteamAPIError
+
+DEFAULT_FRIEND_LIMIT = 20
 
 def build_recent_playtime_features(
     api_key: str,
     steamid: str,
-    friends_limit: int = 50
+    friends_limit: int = DEFAULT_FRIEND_LIMIT
 ) -> pd.DataFrame:
     """
     Returns a DataFrame with these columns:
@@ -15,6 +18,11 @@ def build_recent_playtime_features(
     Handles empty responses gracefully.
     """
     steam = SteamAPI(api_key)
+    try:
+        env_limit = int(os.getenv("STEAM_FRIEND_LIMIT", friends_limit))
+        friends_limit = max(0, env_limit)
+    except (TypeError, ValueError):
+        friends_limit = max(0, friends_limit)
 
     # 1) Your recent plays
     my_recent = steam.get_recently_played_games(steamid, count=100) or []
@@ -29,7 +37,10 @@ def build_recent_playtime_features(
     friends = steam.get_friends(steamid)[:friends_limit] or []
     rows = []
     for fid in friends:
-        rec = steam.get_recently_played_games(fid, count=100) or []
+        try:
+            rec = steam.get_recently_played_games(fid, count=100) or []
+        except SteamAPIError:
+            continue
         for g in rec:
             rows.append((g["appid"], g["playtime_2weeks"]))
     if rows:
