@@ -42,9 +42,10 @@ def _compute_recommendations(steamid: str, k: int, w1: float, w2: float, w3: flo
         adv_rec.library = []
 
     try:
-        feats_df = build_recent_playtime_features(api_key, steamid)
+        feats_df, feature_stats = build_recent_playtime_features(api_key, steamid)
     except SteamAPIError as exc:
         raise UserFacingError(str(exc)) from exc
+    feature_stats = dict(feature_stats or {})
 
     if feats_df.empty:
         feats_df = pd.DataFrame(columns=["appid", "my_playtime", "friends_playtime"])
@@ -59,6 +60,8 @@ def _compute_recommendations(steamid: str, k: int, w1: float, w2: float, w3: flo
         _normalize("my_playtime", "my_playtime_norm")
         _normalize("friends_playtime", "friends_playtime_norm")
 
+    feature_stats["feats_rows"] = int(len(feats_df))
+
     my_recent = feats_df[["appid", "my_playtime_norm"]].rename(
         columns={"my_playtime_norm": "playtime_2weeks"}
     )
@@ -66,6 +69,7 @@ def _compute_recommendations(steamid: str, k: int, w1: float, w2: float, w3: flo
         columns={"friends_playtime_norm": "playtime_2weeks"}
     )
 
+    used_library_fallback = False
     if my_recent["playtime_2weeks"].sum() == 0:
         if "appid" in games_df.columns:
             owned_base = games_df.drop_duplicates(subset=["appid"]).copy()
@@ -86,8 +90,9 @@ def _compute_recommendations(steamid: str, k: int, w1: float, w2: float, w3: flo
                 owned["playtime_forever"] / max_forever if max_forever > 0 else 0.0
             )
             my_recent = owned[["appid", "playtime_2weeks"]]
+        used_library_fallback = True
 
-    recs_df = adv_rec.recommend(
+    recs_df, signal_meta = adv_rec.recommend(
         my_recent=my_recent,
         friends_recent=friends_recent,
         k=k,
@@ -95,8 +100,17 @@ def _compute_recommendations(steamid: str, k: int, w1: float, w2: float, w3: flo
         beta=w2,
         gamma=w3
     )
+    meta = {
+        "features": {
+            **feature_stats,
+            "used_library_fallback": used_library_fallback,
+            "my_recent_rows": int(len(my_recent)),
+            "friends_recent_rows": int(len(friends_recent)),
+        },
+        **signal_meta,
+    }
 
-    return recs_df.to_dict(orient="records")
+    return recs_df.to_dict(orient="records"), meta
 
 @app.route("/", methods=["GET"])
 def index():
@@ -118,13 +132,13 @@ def recommend():
     w3 = float(request.args.get("w3", default=0.15))
 
     try:
-        recs = _compute_recommendations(steamid, k, w1, w2, w3)
+        recs, meta = _compute_recommendations(steamid, k, w1, w2, w3)
     except UserFacingError as exc:
         return render_template("index.html", error=str(exc))
     except Exception as exc:  # surface API errors in the template
         return render_template("index.html", error=str(exc))
 
-    return render_template("index.html", recs=recs)
+    return render_template("index.html", recs=recs, rec_meta=meta)
 
 @app.get("/api/recommend")
 def api_recommend():
@@ -150,16 +164,19 @@ def api_recommend():
         return jsonify({"error": "Invalid numeric parameter."}), 400
 
     try:
-        recs = _compute_recommendations(steam_id, k, w_content, w_playtime, w_social)
+        recs, meta = _compute_recommendations(steam_id, k, w_content, w_playtime, w_social)
     except UserFacingError as exc:
         return jsonify({"error": str(exc)}), 502
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 
-    return jsonify([
-        {"title": item.get("name"), "score": float(item["score"])}
-        for item in recs
-    ])
+    return jsonify({
+        "results": [
+            {"title": item.get("name"), "score": float(item["score"])}
+            for item in recs
+        ],
+        "meta": meta
+    })
 
 if __name__ == "__main__":
     if not os.getenv("STEAM_API_KEY"):

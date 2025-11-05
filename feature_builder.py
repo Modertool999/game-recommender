@@ -1,14 +1,20 @@
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Dict, Tuple
+
 import pandas as pd
+
 from steam_api import SteamAPI, SteamAPIError
 
-DEFAULT_FRIEND_LIMIT = 12
+DEFAULT_FRIEND_LIMIT = 30
+MAX_FRIEND_WORKERS = 8
+
 
 def build_recent_playtime_features(
     api_key: str,
     steamid: str,
     friends_limit: int = DEFAULT_FRIEND_LIMIT
-) -> pd.DataFrame:
+) -> Tuple[pd.DataFrame, Dict[str, int]]:
     """
     Returns a DataFrame with these columns:
       - appid
@@ -36,13 +42,42 @@ def build_recent_playtime_features(
     # 2) Gather friends' recent plays
     friends = steam.get_friends(steamid)[:friends_limit] or []
     rows = []
-    for fid in friends:
+    friends_requested = len(friends)
+    friends_accessible = 0
+    friends_with_recent = 0
+    friends_failed = 0
+
+    def _fetch_recent(fid: str):
         try:
             rec = steam.get_recently_played_games(fid, count=100) or []
+            return "ok", rec
         except SteamAPIError:
-            continue
-        for g in rec:
-            rows.append((g["appid"], g["playtime_2weeks"]))
+            return "error", []
+
+    if friends_requested:
+        max_workers = min(MAX_FRIEND_WORKERS, friends_requested) or 1
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            future_map = {pool.submit(_fetch_recent, fid): fid for fid in friends}
+            for fut in as_completed(future_map):
+                status, rec = fut.result()
+                if status != "ok":
+                    friends_failed += 1
+                    continue
+                friends_accessible += 1
+                if rec:
+                    friends_with_recent += 1
+                    for g in rec:
+                        rows.append((g["appid"], g["playtime_2weeks"]))
+
+    stats = {
+        "friends_requested": friends_requested,
+        "friends_accessible": friends_accessible,
+        "friends_with_recent": friends_with_recent,
+        "friends_failed": friends_failed,
+        "friend_rows": len(rows),
+        "my_recent_count": len(df_my),
+        "friend_limit_effective": friends_limit,
+    }
     if rows:
         df_fr = pd.DataFrame(rows, columns=["appid", "playtime_2weeks"])
         df_fr = df_fr.groupby("appid").agg(
@@ -65,4 +100,4 @@ def build_recent_playtime_features(
         .infer_objects(copy=False)
     )
 
-    return feats
+    return feats, stats

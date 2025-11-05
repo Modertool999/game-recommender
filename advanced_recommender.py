@@ -1,5 +1,7 @@
 import os
 import sqlite3
+from typing import Any, Dict, Tuple
+
 import pandas as pd
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -40,7 +42,7 @@ class AdvancedRecommender:
         alpha: float = 1.0,
         beta: float = 1.0,
         gamma: float = 1.0
-    ) -> pd.DataFrame:
+    ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
         # 1) Filter out games already in library
         mask = ~self.catalog["appid"].isin(self.library)
         candidates = self.catalog[mask].reset_index(drop=True)
@@ -94,14 +96,56 @@ class AdvancedRecommender:
         friends_play_signal = _normalize_signal(raw_fr)
         friends_sim_signal = _normalize_signal(sims_fr)
 
+        requested_weights = {
+            "user": float(alpha),
+            "friends_play": float(beta),
+            "friends_sim": float(gamma)
+        }
+
+        def _has_variation(arr: np.ndarray) -> bool:
+            return bool(arr.size) and not np.allclose(arr, 0.0)
+
+        signal_map = {
+            "user": user_signal,
+            "friends_play": friends_play_signal,
+            "friends_sim": friends_sim_signal
+        }
+        availability = {name: _has_variation(arr) for name, arr in signal_map.items()}
+        active_weight = sum(requested_weights[name] for name, available in availability.items() if available)
+        applied_weights = requested_weights.copy()
+        if active_weight > 0:
+            for name in applied_weights:
+                applied_weights[name] = (
+                    applied_weights[name] / active_weight if availability[name] else 0.0
+                )
+        else:
+            applied_weights = {"user": 1.0, "friends_play": 0.0, "friends_sim": 0.0}
+
         candidates["score"] = (
-            alpha * user_signal
-            + beta * friends_play_signal
-            + gamma * friends_sim_signal
+            applied_weights["user"] * user_signal
+            + applied_weights["friends_play"] * friends_play_signal
+            + applied_weights["friends_sim"] * friends_sim_signal
         )
-        return candidates.sort_values("score", ascending=False).head(k)[
+        ranked = candidates.sort_values("score", ascending=False).head(k)[
             ["appid", "name", "score"]
         ]
+
+        def _nonzero_count(arr: np.ndarray) -> int:
+            return int(np.count_nonzero(arr > 0)) if arr.size else 0
+
+        meta = {
+            "candidate_count": int(len(candidates)),
+            "signals": {
+                name: {
+                    "available": bool(availability[name]),
+                    "requested_weight": float(requested_weights[name]),
+                    "applied_weight": float(applied_weights[name]),
+                    "nonzero_entries": _nonzero_count(signal_map[name]),
+                }
+                for name in signal_map
+            },
+        }
+        return ranked, meta
 
 if __name__ == "__main__":
     # smoke test
@@ -110,7 +154,7 @@ if __name__ == "__main__":
 
     API_KEY = os.getenv("STEAM_API_KEY")
     STEAM_ID = os.getenv("STEAM_ID")
-    feats = build_recent_playtime_features(API_KEY, STEAM_ID, friends_limit=30)
+    feats, _ = build_recent_playtime_features(API_KEY, STEAM_ID, friends_limit=30)
 
     my_recent = feats[["appid", "my_playtime"]].rename(
         columns={"my_playtime": "playtime_2weeks"}
@@ -121,4 +165,8 @@ if __name__ == "__main__":
 
     rec = AdvancedRecommender(db_path="data/steam_catalog.db")
     rec.library = []  # or load your library DataFrame’s appid list
-    print(rec.recommend(my_recent, fr_recent, k=10, alpha=3.0, beta=2.0, gamma=1.0))
+    recommendations, debug_meta = rec.recommend(
+        my_recent, fr_recent, k=10, alpha=3.0, beta=2.0, gamma=1.0
+    )
+    print(recommendations)
+    print(debug_meta)
